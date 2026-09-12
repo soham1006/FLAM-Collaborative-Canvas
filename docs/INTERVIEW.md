@@ -86,3 +86,27 @@ I implemented a **Debounced Persistence Queue** (`PersistenceQueue`):
    - Migrate room state machines to Cloudflare Durable Objects or Fly.io edge machines, keeping authoritative room state close to users with single-digit millisecond latency.
 4. **OffscreenCanvas in Web Workers**:
    - Offload spatial indexing and path geometry math to a background Web Worker so the main browser thread stays completely free for 120Hz display refresh."
+
+---
+
+### Q8: How did you diagnose and solve the WebSocket payload size limit (WS close 1009 / Max payload size exceeded)?
+**Answer:**
+"Rather than merely increasing server payload limits (which treats a symptom rather than the architectural root cause), I addressed the issue at the **protocol and data representation level**:
+1. **Streaming Delta Chunks**: Instead of buffering and transmitting an entire monolithic freehand stroke or canvas state, the engine emits lightweight `STROKE_START`, `STROKE_CHUNK` (batched in 33ms RAF intervals), and `STROKE_END` events.
+2. **0.1px Coordinate Quantization**: High-precision mouse events produce raw 64-bit IEEE floating-point numbers (`234.89127839481`). By rounding to $0.1\text{px}$ (`Math.round(val * 10) / 10`), each coordinate shrinks from ~17 characters down to 5 characters with zero perceptible loss of visual fidelity.
+3. **Distance Filtering**: Sub-pixel micro-jitter ($\Delta x^2 + \Delta y^2 < 1.0\text{px}^2$) is dropped immediately before entering the buffer.
+4. **Overlay Synthesis**: Peer clients receive these batched chunks and render them in real time to their overlay canvas, giving sub-millisecond perceived latency across the network.
+5. **Results**: Peak message size plunged from **50 KB – 150 KB** down to **150 – 350 bytes per chunk** (>98% reduction), completely eliminating WebSocket 1009 errors and enabling butter-smooth remote rendering."
+
+---
+
+### Q9: How did you solve the problem of CanvasEngine being destroyed or re-created on React component re-renders?
+**Answer:**
+"In React, state updates (such as remote cursor movements, active tool changes, or color picker selections) trigger component re-renders. If `useEffect` hooks initializing the canvas engine depend directly on changing function callbacks (e.g. `onShapeCreated`, `onPointerMove`), the effect cleans up and re-instantiates `CanvasEngine`. This wipes out viewport camera position, cancels ongoing gesture drags, resets history undo/redo stacks, and causes visible canvas flashing.
+
+I solved this by **decoupling the engine lifecycle from the React component lifecycle using Mutable Callback Refs**:
+1. All parent event callbacks (`onShapeCreated`, `onShapeUpdated`, `onStrokeChunk`, etc.) are stored in a persistent `callbacksRef.current` object updated synchronously on every render without triggering effects.
+2. The `CanvasEngine` initialization `useEffect` depends *only* on the physical DOM `<canvas>` mount.
+3. The engine attaches its event listeners once to `callbacksRef.current.onX?.()`.
+4. High-frequency store selectors in Zustand are granularized (`s => s.activeTool`, `s => s.strokeColor`), and property updates are pushed into the running engine via dedicated setters (`engine.setTool()`, `engine.setStyleProps()`) without ever tearing down or recreating the engine."
+

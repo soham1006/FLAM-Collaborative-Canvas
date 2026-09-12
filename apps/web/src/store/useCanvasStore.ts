@@ -82,12 +82,12 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   canUndo: false,
   canRedo: false,
 
-  roomId: 'flam-demo-room',
-  roomName: 'Architecture Canvas',
+  roomId: '',
+  roomName: 'Collaborative Board',
   currentUserId: randomId,
   currentUserName: randomName,
   currentUserColor: randomColor,
-  connectionStatus: 'connected',
+  connectionStatus: 'disconnected',
   collaborators: [],
 
   setActiveTool: (tool) => set({ activeTool: tool }),

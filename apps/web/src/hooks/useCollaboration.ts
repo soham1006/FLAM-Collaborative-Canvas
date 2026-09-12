@@ -8,34 +8,46 @@ import {
   ShapeCreatedPayload,
   ShapeUpdatedPayload,
   ShapeDeletedPayload,
+  StrokeStartBroadcastPayload,
+  StrokeChunkBroadcastPayload,
+  StrokeEndPayload,
   ShapeDTO,
+  ShapeUpdateDTO,
+  Point2D,
 } from '@flam/shared';
 import { useCanvasStore } from '../store/useCanvasStore';
 import { CanvasEngine } from '@flam/drawing-engine';
 
 interface UseCollaborationProps {
   engineRef: React.RefObject<CanvasEngine | null>;
+  roomId?: string;
 }
 
-export function useCollaboration({ engineRef }: UseCollaborationProps) {
+export function useCollaboration({ engineRef, roomId: propRoomId }: UseCollaborationProps) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastCursorSendRef = useRef<number>(0);
 
-  // Granular store subscriptions (avoids re-rendering on every store change)
-  const roomId = useCanvasStore((s) => s.roomId);
+  // Granular store subscriptions (avoids re-rendering on store changes)
+  const storeRoomId = useCanvasStore((s) => s.roomId);
+  const roomId = propRoomId || storeRoomId;
   const setConnectionStatus = useCanvasStore((s) => s.setConnectionStatus);
   const setCollaborators = useCanvasStore((s) => s.setCollaborators);
   const updateUserCursor = useCanvasStore((s) => s.updateUserCursor);
   const setRoomInfo = useCanvasStore((s) => s.setRoomInfo);
 
   useEffect(() => {
+    if (!roomId) {
+      setConnectionStatus('disconnected');
+      return;
+    }
+
     let isMounted = true;
     let reconnectAttempts = 0;
 
     const connect = () => {
-      if (!isMounted) return;
+      if (!isMounted || !roomId) return;
 
       // Clean up previous socket instance if any
       if (socketRef.current) {
@@ -64,8 +76,9 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
         reconnectAttempts = 0;
         setConnectionStatus('connected');
 
-        const { currentUserId, currentUserName, currentUserColor, roomId: activeRoomId } =
+        const { currentUserId, currentUserName, currentUserColor, roomId: storeRoomId } =
           useCanvasStore.getState();
+        const activeRoomId = propRoomId || storeRoomId || roomId;
 
         // Send ROOM_JOIN handshake
         const joinMsg: WSMessage = {
@@ -105,9 +118,19 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
               // Filter out current user from remote collaborator list
               setCollaborators(data.users.filter((u) => u.id !== currentUserId));
 
-              // Populate existing shapes on canvas
+              // Populate or merge shapes on canvas without clobbering existing local drawings
               if (engineRef.current && data.shapes.length > 0) {
-                engineRef.current.setShapesFromDTO(data.shapes);
+                const currentShapes = engineRef.current.getShapes();
+                if (currentShapes.length === 0) {
+                  engineRef.current.setShapesFromDTO(data.shapes);
+                } else {
+                  const existingIds = new Set(currentShapes.map((s) => s.id));
+                  for (const s of data.shapes) {
+                    if (!existingIds.has(s.id)) {
+                      engineRef.current.addShape(s, false);
+                    }
+                  }
+                }
               }
               break;
             }
@@ -138,6 +161,36 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
               if (data.userId !== currentUserId) {
                 updateUserCursor(data.userId, data.x, data.y);
                 engineRef.current?.requestRender();
+              }
+              break;
+            }
+
+            case 'STROKE_START_BROADCAST': {
+              const data = msg.payload as StrokeStartBroadcastPayload;
+              if (data.userId !== currentUserId && engineRef.current) {
+                engineRef.current.startRemoteStroke(
+                  data.strokeId,
+                  data.tool,
+                  data.strokeColor,
+                  data.strokeWidth,
+                  data.startPoint
+                );
+              }
+              break;
+            }
+
+            case 'STROKE_CHUNK_BROADCAST': {
+              const data = msg.payload as StrokeChunkBroadcastPayload;
+              if (data.userId !== currentUserId && engineRef.current) {
+                engineRef.current.appendRemoteStrokePoints(data.strokeId, data.points);
+              }
+              break;
+            }
+
+            case 'STROKE_END': {
+              const data = msg.payload as StrokeEndPayload;
+              if (engineRef.current) {
+                engineRef.current.endRemoteStroke(data.strokeId);
               }
               break;
             }
@@ -232,7 +285,8 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
     lastCursorSendRef.current = now;
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      const { roomId: activeRoomId, currentUserId } = useCanvasStore.getState();
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
       socketRef.current.send(
         JSON.stringify({
           type: 'CURSOR_MOVE',
@@ -245,10 +299,62 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
     }
   };
 
+  // Outbound Live Stroke Start Dispatcher
+  const sendStrokeStart = (payload: { strokeId: string; tool: string; strokeColor: string; strokeWidth: number; opacity?: number; startPoint: Point2D }) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'STROKE_START',
+          roomId: activeRoomId,
+          senderId: currentUserId,
+          timestamp: Date.now(),
+          payload,
+        })
+      );
+    }
+  };
+
+  // Outbound Live Stroke Points Chunk Dispatcher
+  const sendStrokeChunk = (payload: { strokeId: string; points: Point2D[] }) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'STROKE_CHUNK',
+          roomId: activeRoomId,
+          senderId: currentUserId,
+          timestamp: Date.now(),
+          payload,
+        })
+      );
+    }
+  };
+
+  // Outbound Live Stroke End Dispatcher
+  const sendStrokeEnd = (payload: { strokeId: string }) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'STROKE_END',
+          roomId: activeRoomId,
+          senderId: currentUserId,
+          timestamp: Date.now(),
+          payload,
+        })
+      );
+    }
+  };
+
   // Outbound Shape Create Dispatcher
   const sendShapeCreated = (shape: ShapeDTO) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      const { roomId: activeRoomId, currentUserId } = useCanvasStore.getState();
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
       socketRef.current.send(
         JSON.stringify({
           type: 'SHAPE_CREATE',
@@ -261,10 +367,29 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
     }
   };
 
+  // Outbound Shape Update Dispatcher
+  const sendShapeUpdated = (shape: ShapeDTO) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
+      const changes: ShapeUpdateDTO = { ...shape };
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'SHAPE_UPDATE',
+          roomId: activeRoomId,
+          senderId: currentUserId,
+          timestamp: Date.now(),
+          payload: { shapeId: shape.id, changes },
+        })
+      );
+    }
+  };
+
   // Outbound Shape Delete Dispatcher
   const sendShapeDeleted = (shapeIds: string[]) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      const { roomId: activeRoomId, currentUserId } = useCanvasStore.getState();
+      const { currentUserId, roomId: storeRoomId } = useCanvasStore.getState();
+      const activeRoomId = propRoomId || storeRoomId || roomId;
       socketRef.current.send(
         JSON.stringify({
           type: 'SHAPE_DELETE',
@@ -279,8 +404,11 @@ export function useCollaboration({ engineRef }: UseCollaborationProps) {
 
   return {
     sendCursorMove,
+    sendStrokeStart,
+    sendStrokeChunk,
+    sendStrokeEnd,
     sendShapeCreated,
+    sendShapeUpdated,
     sendShapeDeleted,
   };
 }
-

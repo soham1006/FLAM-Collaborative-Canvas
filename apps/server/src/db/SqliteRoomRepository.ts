@@ -124,7 +124,15 @@ export class SqliteRoomRepository implements IRoomRepository {
     };
   }
 
+  private resolveRoomId(roomIdOrSlug: string): string {
+    const row = this.db
+      .prepare('SELECT id FROM rooms WHERE id = ? OR slug = ?')
+      .get(roomIdOrSlug, roomIdOrSlug) as any;
+    return row ? row.id : roomIdOrSlug;
+  }
+
   async getShapesByRoomId(roomId: string): Promise<ShapeDTO[]> {
+    const targetRoomId = this.resolveRoomId(roomId);
     const stmt = this.db.prepare(`
       SELECT id, type, x, y, width, height, rotation, strokeColor, fillColor,
              strokeWidth, opacity, zIndex, version, data
@@ -133,7 +141,7 @@ export class SqliteRoomRepository implements IRoomRepository {
       ORDER BY zIndex ASC
     `);
 
-    const rows = stmt.all(roomId) as any[];
+    const rows = stmt.all(targetRoomId) as any[];
     return rows.map((r) => {
       let extra = {};
       try {
@@ -162,6 +170,7 @@ export class SqliteRoomRepository implements IRoomRepository {
   }
 
   async saveShapes(roomId: string, shapesList: ShapeDTO[]): Promise<void> {
+    const targetRoomId = this.resolveRoomId(roomId);
     const now = new Date().toISOString();
     const upsertStmt = this.db.prepare(`
       INSERT INTO canvas_objects (
@@ -208,7 +217,7 @@ export class SqliteRoomRepository implements IRoomRepository {
 
       upsertStmt.run(
         id,
-        roomId,
+        targetRoomId,
         type,
         x,
         y,
@@ -230,6 +239,7 @@ export class SqliteRoomRepository implements IRoomRepository {
 
   async deleteShapes(roomId: string, shapeIds: string[]): Promise<void> {
     if (shapeIds.length === 0) return;
+    const targetRoomId = this.resolveRoomId(roomId);
     const now = new Date().toISOString();
     const placeholders = shapeIds.map(() => '?').join(',');
     const stmt = this.db.prepare(`
@@ -237,14 +247,17 @@ export class SqliteRoomRepository implements IRoomRepository {
       SET deletedAt = ?
       WHERE roomId = ? AND id IN (${placeholders})
     `);
-    stmt.run(now, roomId, ...shapeIds);
+    stmt.run(now, targetRoomId, ...shapeIds);
   }
 
   async listRooms(limit: number = 20): Promise<RoomRecord[]> {
     const stmt = this.db.prepare(`
-      SELECT id, name, slug, createdAt, updatedAt, lastActiveAt, isPublic
-      FROM rooms
-      ORDER BY updatedAt DESC
+      SELECT r.id, r.name, r.slug, r.createdAt, r.updatedAt, r.lastActiveAt, r.isPublic,
+             COUNT(c.id) as shapeCount
+      FROM rooms r
+      LEFT JOIN canvas_objects c ON c.roomId = r.id AND c.deletedAt IS NULL
+      GROUP BY r.id
+      ORDER BY r.updatedAt DESC
       LIMIT ?
     `);
     const rows = stmt.all(limit) as any[];
@@ -256,7 +269,14 @@ export class SqliteRoomRepository implements IRoomRepository {
       updatedAt: new Date(r.updatedAt),
       lastActiveAt: new Date(r.lastActiveAt),
       isPublic: Boolean(r.isPublic),
+      shapeCount: Number(r.shapeCount || 0),
     }));
+  }
+
+  close(): void {
+    try {
+      this.db.close();
+    } catch {}
   }
 }
 

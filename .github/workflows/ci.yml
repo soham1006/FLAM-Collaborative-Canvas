@@ -2,36 +2,44 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [main, master]
+    branches: [master, main]
   pull_request:
-    branches: [main, master]
+    branches: [master, main]
 
 jobs:
   validate:
-    name: Lint, Typecheck, Test & Build
+    name: Build, Lint, Typecheck & Test
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        node-version: [22.x]
+
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install Dependencies
         run: npm ci
 
-      - name: Generate Prisma Client
-        run: npm run prisma:generate --workspace=@flam/server
+      - name: Build Packages (@flam/shared & @flam/drawing-engine)
+        run: |
+          npm run build --workspace=@flam/shared
+          npm run build --workspace=@flam/drawing-engine
 
-      - name: Run Unit Tests (Vitest)
-        run: npm run test
-
-      - name: Strict TypeScript Typecheck
+      - name: Monorepo Typecheck
         run: npm run typecheck
 
-      - name: Production Build
-        run: npm run build
+      - name: Run Test Suites
+        run: npm test
+
+      - name: Build Apps (@flam/server & @flam/web)
+        run: |
+          npm run build --workspace=@flam/server
+          npm run build --workspace=@flam/web

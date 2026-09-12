@@ -8,6 +8,8 @@ import {
   FileImage,
   Code2,
   FileJson,
+  ChevronLeft,
+  Copy,
   HelpCircle,
 } from 'lucide-react';
 import { useCanvasStore } from '../../store/useCanvasStore';
@@ -17,6 +19,7 @@ interface HeaderProps {
   onToggleTheme: () => void;
   onExport?: (format: 'png' | 'svg' | 'json') => void;
   onOpenShortcuts?: () => void;
+  onBackToLanding?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   onExport,
   onOpenShortcuts,
+  onBackToLanding,
 }) => {
   const {
     roomName,
@@ -38,7 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [showExportMenu, setShowExportMenu] = useState(false);
 
   const handleShare = () => {
-    const url = `${window.location.origin}?room=${roomId}`;
+    const url = `${window.location.origin}/board/${roomId}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -47,20 +51,41 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="h-14 px-4 border-b border-[var(--surface-panel-border)] bg-[var(--surface-panel)] flex items-center justify-between shadow-sm z-20 select-none">
       {/* Left: Branding & Room Details */}
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-[var(--accent-primary)] flex items-center justify-center text-white font-bold text-base shadow-sm">
+      <div className="flex items-center gap-2 sm:gap-3">
+        {onBackToLanding && (
+          <button
+            onClick={onBackToLanding}
+            className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-[var(--surface-panel-border)] hover:bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            title="Return to Boards Dashboard"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Boards</span>
+          </button>
+        )}
+
+        <button
+          onClick={onBackToLanding}
+          className="w-8 h-8 rounded-lg bg-[var(--accent-primary)] flex items-center justify-center text-white font-bold text-base shadow-sm hover:opacity-90 active:scale-95 transition-transform"
+          title="FLAM Canvas Home"
+        >
           F
-        </div>
+        </button>
+
         <div className="flex flex-col">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm tracking-tight text-[var(--text-primary)]">
+            <span className="font-semibold text-xs sm:text-sm tracking-tight text-[var(--text-primary)] truncate max-w-[140px] sm:max-w-[220px]">
               {roomName}
             </span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono text-[var(--text-muted)] bg-[var(--surface-hover)] border border-[var(--surface-panel-border)]">
-              {roomId}
-            </span>
+            <button
+              onClick={handleShare}
+              title="Click to copy Room ID"
+              className="text-[10px] px-1.5 py-0.5 rounded font-mono text-[var(--text-muted)] bg-[var(--surface-hover)] border border-[var(--surface-panel-border)] hover:border-sky-500/40 hover:text-[var(--text-primary)] transition-colors flex items-center gap-1"
+            >
+              <span>{roomId}</span>
+              <Copy className="w-2.5 h-2.5 opacity-60" />
+            </button>
           </div>
-          <span className="text-[11px] text-[var(--text-secondary)]">
+          <span className="text-[10px] sm:text-[11px] text-[var(--text-secondary)] hidden xs:inline">
             FLAM Collaborative Canvas
           </span>
         </div>

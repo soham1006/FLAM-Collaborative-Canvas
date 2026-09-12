@@ -77,8 +77,8 @@ The system uses an in-memory **write-back buffer**:
 
 ## 4. Repository Pattern (SOLID Principles)
 
-To ensure the codebase runs seamlessly in all environments, the data access layer implements the **Repository Pattern**:
-- `IRoomRepository`: Core interface defining shape and room persistence contracts.
-- `InMemoryRoomRepository`: Provides instant, zero-config local development without needing Docker or an external database.
-- `PrismaRoomRepository`: Production implementation connecting to Neon Serverless PostgreSQL.
-- Switching between them is handled dynamically in `apps/server/src/db/index.ts` based on the presence of `DATABASE_URL`.
+To ensure the codebase runs seamlessly across all local and cloud environments, the persistence layer strictly adheres to the **Repository Pattern** and Dependency Inversion Principle:
+- `IRoomRepository`: Core contract defining room queries, shape upserts, soft deletes, and pagination.
+- `SqliteRoomRepository`: **Default Development Repository**. Utilizes Node 22 native `node:sqlite` (`DatabaseSync`) targeting `./dev.db`. Configured with `WAL` (Write-Ahead Logging) mode, synchronous normal, foreign key constraints, composite index `(roomId, deletedAt)`, and resilient ID/slug resolution. Zero external C++ native compile steps needed on Windows/macOS/Linux.
+- `PrismaRoomRepository`: **Production Cloud Repository**. Connects to serverless PostgreSQL (Neon / Supabase) via Prisma ORM for distributed production deployments.
+- Switching between them is handled dynamically in `apps/server/src/db/index.ts`: when `DATABASE_URL` is set to PostgreSQL, it instantiates `PrismaRoomRepository`; otherwise, it defaults to `SqliteRoomRepository('./dev.db')`.

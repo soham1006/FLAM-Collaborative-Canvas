@@ -94,11 +94,24 @@ This guarantees razor-sharp stroke and text rasterization on 4K, 5K, and Retina 
    - Common canvas setup (translation to shape center, rotation transform, alpha opacity, stroke styling) is handled in `BaseShape.render()`.
    - Polymorphic subclasses override `protected drawGeometry(ctx: CanvasRenderingContext2D): void`.
 2. **Command Pattern (`ICommand`)**:
-   - Every mutation is encapsulated as a reversible command (`AddShapeCommand`, `DeleteShapeCommand`, `MoveShapeCommand`).
-   - Powers the multi-level `HistoryManager` with bounded undo/redo stacks.
+   - Every mutation is encapsulated as a reversible command (`AddShapeCommand`, `DeleteShapeCommand`, `MoveShapeCommand`, `ResizeShapeCommand`).
+   - Powers the multi-level `HistoryManager` with bounded undo/redo stacks and atomic rollback.
 3. **Factory Pattern (`ShapeFactory`)**:
    - Instantiates concrete polymorphic `BaseShape` subclasses from serializable `ShapeDTO` packets.
 4. **Spatial Partitioning Pattern (`SpatialGrid`)**:
    - In-memory uniform grid divides the world space into $250 \times 250$ unit cells, enabling $\mathcal{O}(k)$ viewport culling queries instead of $\mathcal{O}(N)$ brute-force scans.
 5. **Observer Pattern (`EventBus`)**:
    - Decoupled typed event emitter for synchronizing UI state with engine lifecycle events.
+
+---
+
+## 5. Room Management & Client SPA Routing Architecture
+
+The application implements a zero-dependency, history-backed SPA router (`useRouter`):
+1. **Landing Page (`/`)**:
+   - Serves as the launchpad for creating new boards (with human-readable slugs like `board-falcon-48` or custom names), joining existing rooms via room ID or shared URL, and accessing recently visited boards cached in `localStorage` (`flam_recent_boards`).
+   - Discovers and lists server-persisted rooms via `GET /api/rooms`.
+2. **Collaborative Board Canvas (`/board/:roomId`)**:
+   - Directly mounts the collaborative canvas for the target room.
+   - Automatically synchronizes URL changes without reloading the page.
+   - The `CanvasEngine` instance is completely decoupled from React lifecycle renders via mutable callback refs (`callbacksRef`), preventing engine teardown during store updates or route state reconciliation.

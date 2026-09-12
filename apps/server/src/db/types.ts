@@ -8,6 +8,7 @@ export interface RoomRecord {
   updatedAt: Date;
   lastActiveAt: Date;
   isPublic: boolean;
+  shapeCount?: number;
 }
 
 export interface IRoomRepository {

@@ -9,37 +9,54 @@ import { useCanvasEngine } from './hooks/useCanvasEngine';
 import { useCollaboration } from './hooks/useCollaboration';
 import { CanvasEngine } from '@flam/drawing-engine';
 import { ShortcutsModal } from './components/modals/ShortcutsModal';
+import { LandingPage } from './components/landing/LandingPage';
+import { useRouter } from './hooks/useRouter';
+import { saveRecentBoard } from './utils/recentBoards';
 
-export default function App() {
-  const [isDark, setIsDark] = useState(false);
+interface BoardWorkspaceProps {
+  roomId: string;
+  isDark: boolean;
+  onToggleTheme: () => void;
+  onBackToLanding: () => void;
+}
+
+function BoardWorkspace({
+  roomId,
+  isDark,
+  onToggleTheme,
+  onBackToLanding,
+}: BoardWorkspaceProps) {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [canvases, setCanvases] = useState<{ base: HTMLCanvasElement; overlay: HTMLCanvasElement } | null>(null);
-  const { setActiveTool, setRoomInfo, roomId } = useCanvasStore();
+  const { setActiveTool, setRoomInfo } = useCanvasStore();
 
   const sharedEngineRef = useRef<CanvasEngine | null>(null);
-  const collab = useCollaboration({ engineRef: sharedEngineRef });
+  const collab = useCollaboration({ engineRef: sharedEngineRef, roomId });
 
   const activeEngineRef = useCanvasEngine({
     canvases,
     onShapeCreated: (shape) => collab.sendShapeCreated(shape),
+    onShapeUpdated: (shape) => collab.sendShapeUpdated(shape),
     onShapeDeleted: (shapeIds) => collab.sendShapeDeleted(shapeIds),
     onPointerMove: (world) => collab.sendCursorMove(world.x, world.y),
+    onStrokeStart: (payload) => collab.sendStrokeStart(payload),
+    onStrokeChunk: (payload) => collab.sendStrokeChunk(payload),
+    onStrokeEnd: (payload) => collab.sendStrokeEnd(payload),
   });
 
-  // Keep shared ref updated
+  // Keep shared engine ref updated
   useEffect(() => {
     sharedEngineRef.current = activeEngineRef.current;
   }, [activeEngineRef]);
 
-  // Support Room ID in URL search params (e.g. ?room=flam-room-1)
+  // Sync Room ID and title to store & save in recent boards
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    if (roomParam && roomParam !== roomId) {
-      setRoomInfo(
-        roomParam,
-        roomParam.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-      );
+    if (roomId) {
+      const friendlyName = roomId
+        .replace(/-/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+      setRoomInfo(roomId, friendlyName);
+      saveRecentBoard({ id: roomId, name: friendlyName });
     }
   }, [roomId, setRoomInfo]);
 
@@ -94,7 +111,9 @@ export default function App() {
 
     if (format === 'json') {
       const shapes = activeEngineRef.current.getShapes().map((s) => s.serialize());
-      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(shapes, null, 2));
+      const dataStr =
+        'data:text/json;charset=utf-8,' +
+        encodeURIComponent(JSON.stringify(shapes, null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute('href', dataStr);
       downloadAnchor.setAttribute('download', `${roomId}-canvas.json`);
@@ -147,31 +166,54 @@ export default function App() {
   };
 
   return (
+    <div className="w-full h-full flex flex-col relative bg-[var(--canvas-bg)] text-[var(--text-primary)] transition-colors duration-200">
+      {/* Top Header */}
+      <Header
+        isDark={isDark}
+        onToggleTheme={onToggleTheme}
+        onExport={handleExport}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onBackToLanding={onBackToLanding}
+      />
+
+      {/* Main Canvas Workspace */}
+      <main className="flex-1 relative overflow-hidden">
+        <CanvasContainer onMount={setCanvases} />
+        <PropertiesPanel />
+        <Toolbar
+          onUndo={() => activeEngineRef.current?.undo()}
+          onRedo={() => activeEngineRef.current?.redo()}
+        />
+        <Minimap />
+        <ShortcutsModal
+          isOpen={isShortcutsOpen}
+          onClose={() => setIsShortcutsOpen(false)}
+        />
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  const [isDark, setIsDark] = useState(false);
+  const { roomId, navigate } = useRouter();
+
+  return (
     <div className={`w-screen h-screen overflow-hidden flex flex-col ${isDark ? 'dark' : ''}`}>
-      <div className="w-full h-full flex flex-col relative bg-[var(--canvas-bg)] text-[var(--text-primary)] transition-colors duration-200">
-        {/* Top Header */}
-        <Header
+      {!roomId ? (
+        <LandingPage
+          onNavigate={navigate}
           isDark={isDark}
           onToggleTheme={() => setIsDark(!isDark)}
-          onExport={handleExport}
-          onOpenShortcuts={() => setIsShortcutsOpen(true)}
         />
-
-        {/* Main Canvas Workspace */}
-        <main className="flex-1 relative overflow-hidden">
-          <CanvasContainer onMount={setCanvases} />
-          <PropertiesPanel />
-          <Toolbar
-            onUndo={() => activeEngineRef.current?.undo()}
-            onRedo={() => activeEngineRef.current?.redo()}
-          />
-          <Minimap />
-          <ShortcutsModal
-            isOpen={isShortcutsOpen}
-            onClose={() => setIsShortcutsOpen(false)}
-          />
-        </main>
-      </div>
+      ) : (
+        <BoardWorkspace
+          roomId={roomId}
+          isDark={isDark}
+          onToggleTheme={() => setIsDark(!isDark)}
+          onBackToLanding={() => navigate('/')}
+        />
+      )}
     </div>
   );
 }

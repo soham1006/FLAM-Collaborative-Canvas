@@ -30,9 +30,14 @@ interface WSMessage<T = unknown> {
 | `USER_LEFT` | Server $\rightarrow$ Client | Broadcast informing peers of user departure or disconnect. | Broadcast |
 | `CURSOR_MOVE` | Client $\rightarrow$ Server | Transmits mouse pointer $(x_w, y_w)$ in world space. | **Throttled to 30ms (33 Hz)** |
 | `CURSOR_BROADCAST`| Server $\rightarrow$ Client | Relays peer cursor positions and user tags. | Broadcast (omitting sender) |
+| `STROKE_START` | Client $\rightarrow$ Server | Signals start of live freehand stroke with initial quantized anchor. | Immediate on pointer down |
+| `STROKE_START_BROADCAST` | Server $\rightarrow$ Client | Relays live stroke initiation with user identity and color. | Broadcast (omitting sender) |
+| `STROKE_CHUNK` | Client $\rightarrow$ Server | Batched 0.1px quantized delta points for active stroke. | **RAF / 33ms buffer (<350 bytes)** |
+| `STROKE_CHUNK_BROADCAST` | Server $\rightarrow$ Client | Relays stroke delta points to peer overlay canvases. | Broadcast (omitting sender) |
+| `STROKE_END` | Client $\rightarrow$ Server / Broadcast | Signals conclusion of live freehand stroke before shape consolidation. | Immediate on pointer up |
 | `SHAPE_CREATE` | Client $\rightarrow$ Server | Optimistically drawn local shape sent to server. | Immediate |
 | `SHAPE_CREATED`| Server $\rightarrow$ Client | Confirmed shape stamped with atomic sequence number. | Broadcast to all clients |
-| `SHAPE_UPDATE` | Client $\rightarrow$ Server | Partial updates during dragging or resizing. | Throttled during drag; final on pointer up |
+| `SHAPE_UPDATE` | Client $\rightarrow$ Server | Partial updates during dragging or multi-handle resizing. | Throttled during drag; final on pointer up |
 | `SHAPE_UPDATED`| Server $\rightarrow$ Client | Broadcast of shape mutations with new sequence number. | Broadcast |
 | `SHAPE_DELETE` | Client $\rightarrow$ Server | Request to delete one or more shapes. | Immediate |
 | `SHAPE_DELETED`| Server $\rightarrow$ Client | Confirms deletion with atomic sequence number. | Broadcast |
