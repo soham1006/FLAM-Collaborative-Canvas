@@ -1,0 +1,62 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Room {
+  id           String         @id @default(uuid())
+  name         String
+  slug         String         @unique
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lastActiveAt DateTime       @default(now())
+  isPublic     Boolean        @default(true)
+  shapes       CanvasObject[]
+  snapshots    RoomSnapshot[]
+
+  @@index([slug])
+  @@map("rooms")
+}
+
+model CanvasObject {
+  id          String    @id @default(uuid())
+  roomId      String
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type        String    // rectangle, circle, line, arrow, text, freehand
+  x           Float
+  y           Float
+  width       Float
+  height      Float
+  rotation    Float     @default(0)
+  zIndex      Int       @default(0)
+  strokeColor String    @default("#0f172a")
+  fillColor   String    @default("transparent")
+  strokeWidth Float     @default(2)
+  opacity     Float     @default(1)
+  data        Json      // Points array for freehand, text string, font size, etc.
+  version     Int       @default(1)
+  deletedAt   DateTime? // Soft delete timestamp for sync recovery
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([roomId, deletedAt])
+  @@map("canvas_objects")
+}
+
+model RoomSnapshot {
+  id           String   @id @default(uuid())
+  roomId       String
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sequenceId   Int
+  objectCount  Int
+  snapshotJson Json     // Compressed JSON of full room state for fast initial joins
+  createdAt    DateTime @default(now())
+
+  @@index([roomId, createdAt(sort: Desc)])
+  @@map("room_snapshots")
+}
