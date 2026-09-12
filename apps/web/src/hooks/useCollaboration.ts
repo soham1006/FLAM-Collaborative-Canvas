@@ -25,8 +25,8 @@ interface UseCollaborationProps {
 
 export function useCollaboration({ engineRef, roomId: propRoomId }: UseCollaborationProps) {
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCursorSendRef = useRef<number>(0);
   const pendingInitialShapesRef = useRef<ShapeDTO[] | null>(null);
 
