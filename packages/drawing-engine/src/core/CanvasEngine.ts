@@ -17,6 +17,8 @@ import { AddShapeCommand } from '../commands/AddShapeCommand.js';
 import { DeleteShapeCommand } from '../commands/DeleteShapeCommand.js';
 import { MoveShapeCommand } from '../commands/MoveShapeCommand.js';
 
+import { ResizeShapeCommand } from '../commands/ResizeShapeCommand.js';
+
 export type CanvasTool =
   | 'select'
   | 'hand'
@@ -43,6 +45,9 @@ export interface CanvasEngineOptions {
   onShapeDeleted?: (shapeIds: string[]) => void;
   onSelectionChange?: (selectedIds: string[]) => void;
   onHistoryChange?: (state: HistoryState) => void;
+  onStrokeStart?: (payload: { strokeId: string; tool: string; strokeColor: string; strokeWidth: number; opacity?: number; startPoint: Point2D }) => void;
+  onStrokeChunk?: (payload: { strokeId: string; points: Point2D[] }) => void;
+  onStrokeEnd?: (payload: { strokeId: string }) => void;
 }
 
 export class CanvasEngine {
@@ -80,6 +85,13 @@ export class CanvasEngine {
   private activeHandle: HandleType | null = null;
   private totalDragDelta: { dx: number; dy: number } = { dx: 0, dy: 0 };
   private lastMousePos: { x: number; y: number } = { x: 0, y: 0 };
+
+  // Remote streaming strokes & Clipboard
+  private remoteActiveStrokes: Map<string, FreehandPath> = new Map();
+  private pendingStrokePoints: Point2D[] = [];
+  private lastChunkFlushTime: number = 0;
+  private clipboard: ShapeDTO[] = [];
+  private initialResizeBounds: Map<string, { x: number; y: number; width: number; height: number }> = new Map();
 
   // Callbacks
   private callbacks: CanvasEngineOptions;
@@ -143,6 +155,7 @@ export class CanvasEngine {
     const instance = shape instanceof BaseShape ? shape : ShapeFactory.fromDTO(shape);
     this.shapes.set(instance.id, instance);
     this.spatialGrid.insert(instance);
+    this.remoteActiveStrokes.delete(instance.id);
     this.renderLoop.requestBaseRender();
 
     if (emit) {
@@ -227,6 +240,175 @@ export class CanvasEngine {
     this.renderLoop.requestAll();
   }
 
+  public startRemoteStroke(strokeId: string, _tool: string, strokeColor: string, strokeWidth: number, startPoint: Point2D): void {
+    const stroke = new FreehandPath({
+      id: strokeId,
+      type: 'freehand',
+      x: startPoint.x,
+      y: startPoint.y,
+      width: 0,
+      height: 0,
+      rotation: 0,
+      strokeColor,
+      fillColor: 'transparent',
+      strokeWidth,
+      opacity: 1,
+      zIndex: this.shapes.size,
+      version: 1,
+      points: [startPoint],
+    });
+    this.remoteActiveStrokes.set(strokeId, stroke);
+    this.renderLoop.requestOverlayRender();
+  }
+
+  public appendRemoteStrokePoints(strokeId: string, points: Point2D[]): void {
+    const stroke = this.remoteActiveStrokes.get(strokeId);
+    if (stroke) {
+      stroke.addPoints(points);
+      this.renderLoop.requestOverlayRender();
+    }
+  }
+
+  public endRemoteStroke(strokeId: string): void {
+    this.remoteActiveStrokes.delete(strokeId);
+    this.renderLoop.requestOverlayRender();
+  }
+
+  public duplicateSelected(): void {
+    const selected = this.selection.getSelectedIds();
+    if (selected.length === 0) return;
+
+    const newIds: string[] = [];
+    for (const id of selected) {
+      const shape = this.shapes.get(id);
+      if (!shape) continue;
+      const serialized = shape.serialize();
+      const newId = 'shape-' + Math.random().toString(36).substring(2, 9);
+      const duplicatedDTO: any = {
+        ...serialized,
+        id: newId,
+        x: Math.round((serialized.x + 20) * 10) / 10,
+        y: Math.round((serialized.y + 20) * 10) / 10,
+        zIndex: this.shapes.size,
+      };
+      if (duplicatedDTO.type === 'line' || duplicatedDTO.type === 'arrow') {
+        duplicatedDTO.x2 = Math.round((duplicatedDTO.x2 + 20) * 10) / 10;
+        duplicatedDTO.y2 = Math.round((duplicatedDTO.y2 + 20) * 10) / 10;
+      } else if (duplicatedDTO.type === 'freehand' && Array.isArray(duplicatedDTO.points)) {
+        duplicatedDTO.points = duplicatedDTO.points.map((p: Point2D) => ({
+          x: Math.round((p.x + 20) * 10) / 10,
+          y: Math.round((p.y + 20) * 10) / 10,
+        }));
+      }
+
+      const instance = ShapeFactory.fromDTO(duplicatedDTO);
+      const cmd = new AddShapeCommand(this, instance);
+      this.history.execute(cmd);
+      newIds.push(newId);
+    }
+
+    this.selection.setSelection(newIds);
+    this.callbacks.onSelectionChange?.(newIds);
+    this.renderLoop.requestAll();
+  }
+
+  public copySelected(): void {
+    const selected = this.selection.getSelectedIds();
+    this.clipboard = selected
+      .map((id) => this.shapes.get(id))
+      .filter((s): s is BaseShape => Boolean(s))
+      .map((s) => s.serialize());
+  }
+
+  public pasteSelected(): void {
+    if (this.clipboard.length === 0) return;
+
+    const newIds: string[] = [];
+    for (const item of this.clipboard) {
+      const newId = 'shape-' + Math.random().toString(36).substring(2, 9);
+      const pastedDTO: any = {
+        ...item,
+        id: newId,
+        x: Math.round((item.x + 25) * 10) / 10,
+        y: Math.round((item.y + 25) * 10) / 10,
+        zIndex: this.shapes.size,
+      };
+      if (pastedDTO.type === 'line' || pastedDTO.type === 'arrow') {
+        pastedDTO.x2 = Math.round((pastedDTO.x2 + 25) * 10) / 10;
+        pastedDTO.y2 = Math.round((pastedDTO.y2 + 25) * 10) / 10;
+      } else if (pastedDTO.type === 'freehand' && Array.isArray(pastedDTO.points)) {
+        pastedDTO.points = pastedDTO.points.map((p: Point2D) => ({
+          x: Math.round((p.x + 25) * 10) / 10,
+          y: Math.round((p.y + 25) * 10) / 10,
+        }));
+      }
+
+      const instance = ShapeFactory.fromDTO(pastedDTO);
+      const cmd = new AddShapeCommand(this, instance);
+      this.history.execute(cmd);
+      newIds.push(newId);
+    }
+
+    this.selection.setSelection(newIds);
+    this.callbacks.onSelectionChange?.(newIds);
+    this.renderLoop.requestAll();
+  }
+
+  public selectAll(): void {
+    const ids = Array.from(this.shapes.keys());
+    this.selection.setSelection(ids);
+    this.callbacks.onSelectionChange?.(ids);
+    this.renderLoop.requestOverlayRender();
+  }
+
+  public fitToContent(): void {
+    const shapeList = Array.from(this.shapes.values());
+    if (shapeList.length === 0) {
+      this.viewport.reset();
+      this.renderLoop.requestAll();
+      return;
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const s of shapeList) {
+      const b = s.getBounds();
+      if (b.minX < minX) minX = b.minX;
+      if (b.minY < minY) minY = b.minY;
+      if (b.maxX > maxX) maxX = b.maxX;
+      if (b.maxY > maxY) maxY = b.maxY;
+    }
+
+    const padding = 60;
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+
+    const canvasWidth = this.baseCanvas.width / this.viewport.getDpr();
+    const canvasHeight = this.baseCanvas.height / this.viewport.getDpr();
+
+    const scaleX = (canvasWidth - padding * 2) / Math.max(contentWidth, 1);
+    const scaleY = (canvasHeight - padding * 2) / Math.max(contentHeight, 1);
+    const zoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.1), 3.0);
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    const panX = canvasWidth / 2 - centerX * zoom;
+    const panY = canvasHeight / 2 - centerY * zoom;
+
+    this.viewport.setPan(panX, panY);
+    this.viewport.setZoom(zoom);
+    this.renderLoop.requestAll();
+  }
+
+  public resetZoom(): void {
+    this.viewport.setZoom(1.0);
+    this.renderLoop.requestAll();
+  }
+
   // ==========================================
   // Event Listeners & Interaction Dispatch
   // ==========================================
@@ -290,6 +472,15 @@ export class CanvasEngine {
       const handle = this.selection.hitTestHandle(worldPoint, bounds, this.viewport.getZoom());
       if (handle) {
         this.activeHandle = handle;
+        if (handle !== 'body') {
+          this.initialResizeBounds.clear();
+          for (const id of this.selection.getSelectedIds()) {
+            const s = this.shapes.get(id);
+            if (s) {
+              this.initialResizeBounds.set(id, { x: s.x, y: s.y, width: s.width, height: s.height });
+            }
+          }
+        }
         return;
       }
     }
@@ -351,9 +542,20 @@ export class CanvasEngine {
       case 'arrow':
         this.activeShape = new Arrow({ ...baseProps, type: 'arrow', x2: worldPoint.x, y2: worldPoint.y });
         break;
-      case 'freehand':
-        this.activeShape = new FreehandPath({ ...baseProps, type: 'freehand', points: [{ ...worldPoint }] });
+      case 'freehand': {
+        this.activeShape = new FreehandPath({ ...baseProps, type: 'freehand', points: [FreehandPath.roundPoint(worldPoint)] });
+        this.pendingStrokePoints = [FreehandPath.roundPoint(worldPoint)];
+        this.lastChunkFlushTime = performance.now();
+        this.callbacks.onStrokeStart?.({
+          strokeId: id,
+          tool: 'freehand',
+          strokeColor: this.styleProps.strokeColor,
+          strokeWidth: this.styleProps.strokeWidth,
+          opacity: this.styleProps.opacity,
+          startPoint: FreehandPath.roundPoint(worldPoint),
+        });
         break;
+      }
       case 'text': {
         const text = prompt('Enter text for canvas:', 'Double-click to edit');
         if (text && text.trim()) {
@@ -429,6 +631,72 @@ export class CanvasEngine {
       return;
     }
 
+    // 2b. Resizing selected shapes via handles
+    if (this.activeHandle) {
+      const dx = worldPoint.x - this.startPoint.x;
+      const dy = worldPoint.y - this.startPoint.y;
+
+      for (const id of this.selection.getSelectedIds()) {
+        const shape = this.shapes.get(id);
+        const initial = this.initialResizeBounds.get(id);
+        if (!shape || !initial) continue;
+
+        let newX = initial.x;
+        let newY = initial.y;
+        let newW = initial.width;
+        let newH = initial.height;
+
+        switch (this.activeHandle) {
+          case 'se':
+            newW = initial.width + dx;
+            newH = initial.height + dy;
+            break;
+          case 'e':
+            newW = initial.width + dx;
+            break;
+          case 's':
+            newH = initial.height + dy;
+            break;
+          case 'ne':
+            newW = initial.width + dx;
+            newY = initial.y + dy;
+            newH = initial.height - dy;
+            break;
+          case 'nw':
+            newX = initial.x + dx;
+            newY = initial.y + dy;
+            newW = initial.width - dx;
+            newH = initial.height - dy;
+            break;
+          case 'sw':
+            newX = initial.x + dx;
+            newW = initial.width - dx;
+            newH = initial.height + dy;
+            break;
+          case 'w':
+            newX = initial.x + dx;
+            newW = initial.width - dx;
+            break;
+          case 'n':
+            newY = initial.y + dy;
+            newH = initial.height - dy;
+            break;
+        }
+
+        if (newW > 4) {
+          shape.x = Math.round(newX * 10) / 10;
+          shape.width = Math.round(newW * 10) / 10;
+        }
+        if (newH > 4) {
+          shape.y = Math.round(newY * 10) / 10;
+          shape.height = Math.round(newH * 10) / 10;
+        }
+        this.spatialGrid.update(shape);
+      }
+      this.renderLoop.requestAll();
+      return;
+    }
+
     // 3. Active shape geometry drawing
     if (this.activeShape) {
       if (this.activeShape instanceof Rectangle || this.activeShape instanceof Circle) {
@@ -440,7 +708,19 @@ export class CanvasEngine {
         this.activeShape.width = this.activeShape.x2 - this.activeShape.x;
         this.activeShape.height = this.activeShape.y2 - this.activeShape.y;
       } else if (this.activeShape instanceof FreehandPath) {
-        this.activeShape.addPoint(worldPoint);
+        const added = this.activeShape.addPoint(worldPoint);
+        if (added) {
+          this.pendingStrokePoints.push(FreehandPath.roundPoint(worldPoint));
+          const now = performance.now();
+          if (this.pendingStrokePoints.length >= 6 || (now - this.lastChunkFlushTime > 33 && this.pendingStrokePoints.length > 0)) {
+            this.callbacks.onStrokeChunk?.({
+              strokeId: this.activeShape.id,
+              points: [...this.pendingStrokePoints],
+            });
+            this.pendingStrokePoints = [];
+            this.lastChunkFlushTime = now;
+          }
+        }
       }
 
       this.renderLoop.requestOverlayRender();
@@ -501,6 +781,27 @@ export class CanvasEngine {
       return;
     }
 
+    // 2b. Commit Resize Command to History
+    if (this.activeHandle) {
+      for (const [id, initial] of this.initialResizeBounds.entries()) {
+        const shape = this.shapes.get(id);
+        if (shape && (shape.x !== initial.x || shape.y !== initial.y || shape.width !== initial.width || shape.height !== initial.height)) {
+          const currentSnap = { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+          const initialSnap = { ...initial };
+          const cmd = new ResizeShapeCommand(shape, initialSnap, currentSnap, () => this.renderLoop.requestAll());
+          this.history.execute({
+            execute: () => cmd.execute(),
+            undo: () => cmd.undo(),
+            redo: () => cmd.redo(),
+          });
+          this.callbacks.onShapeUpdated?.(shape.serialize());
+        }
+      }
+      this.initialResizeBounds.clear();
+      this.activeHandle = null;
+      return;
+    }
+
     // 3. Commit Add Shape Command to History
     if (this.activeShape) {
       if (this.activeShape instanceof Rectangle || this.activeShape instanceof Circle) {
@@ -515,7 +816,15 @@ export class CanvasEngine {
       }
 
       if (this.activeShape instanceof FreehandPath) {
-        this.activeShape.simplify(1.2);
+        if (this.pendingStrokePoints.length > 0) {
+          this.callbacks.onStrokeChunk?.({
+            strokeId: this.activeShape.id,
+            points: [...this.pendingStrokePoints],
+          });
+          this.pendingStrokePoints = [];
+        }
+        this.callbacks.onStrokeEnd?.({ strokeId: this.activeShape.id });
+        this.activeShape.simplify(1.0);
       }
 
       const isSignificant =
@@ -544,6 +853,52 @@ export class CanvasEngine {
       if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
         this.deleteSelected();
       }
+    }
+
+    // Duplicate (Ctrl/Cmd + D)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      this.duplicateSelected();
+      return;
+    }
+
+    // Copy (Ctrl/Cmd + C)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        this.copySelected();
+        return;
+      }
+    }
+
+    // Paste (Ctrl/Cmd + V)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+      if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        this.pasteSelected();
+        return;
+      }
+    }
+
+    // Select All (Ctrl/Cmd + A)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        this.selectAll();
+        return;
+      }
+    }
+
+    // Zoom shortcuts: Ctrl+0 reset, Ctrl+1 fit
+    if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+      e.preventDefault();
+      this.resetZoom();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === '1') {
+      e.preventDefault();
+      this.fitToContent();
+      return;
     }
 
     // Undo / Redo Hotkeys
@@ -607,6 +962,11 @@ export class CanvasEngine {
     // 1. Active shape preview
     if (this.activeShape) {
       this.activeShape.render(ctx, this.viewport);
+    }
+
+    // 1b. Remote live stroke previews
+    for (const stroke of this.remoteActiveStrokes.values()) {
+      stroke.render(ctx, this.viewport);
     }
 
     // 2. Selection handles, bounding box, or marquee

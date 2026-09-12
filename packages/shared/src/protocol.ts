@@ -23,6 +23,13 @@ export type WSMessageType =
   | 'SHAPE_DELETED'
   | 'SHAPES_BATCH'
   
+  // Real-time Stroke Streaming
+  | 'STROKE_START'
+  | 'STROKE_START_BROADCAST'
+  | 'STROKE_CHUNK'
+  | 'STROKE_CHUNK_BROADCAST'
+  | 'STROKE_END'
+  
   // Heartbeats
   | 'PING'
   | 'PONG';
@@ -133,3 +140,39 @@ export interface ErrorPayload {
   message: string;
   details?: unknown;
 }
+
+// Live Stroke Streaming Payloads
+export interface StrokeStartPayload {
+  strokeId: string;
+  tool: string;
+  strokeColor: string;
+  strokeWidth: number;
+  opacity?: number;
+  startPoint: { x: number; y: number };
+}
+
+export interface StrokeStartBroadcastPayload {
+  userId: string;
+  strokeId: string;
+  tool: string;
+  strokeColor: string;
+  strokeWidth: number;
+  opacity?: number;
+  startPoint: { x: number; y: number };
+}
+
+export interface StrokeChunkPayload {
+  strokeId: string;
+  points: { x: number; y: number }[];
+}
+
+export interface StrokeChunkBroadcastPayload {
+  userId: string;
+  strokeId: string;
+  points: { x: number; y: number }[];
+}
+
+export interface StrokeEndPayload {
+  strokeId: string;
+}
+

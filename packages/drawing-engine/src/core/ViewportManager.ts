@@ -43,6 +43,12 @@ export class ViewportManager {
     this.notify();
   }
 
+  reset(): void {
+    this.pan = new Vector2D(0, 0);
+    this.zoom = 1;
+    this.notify();
+  }
+
   panBy(dx: number, dy: number): void {
     this.pan = new Vector2D(this.pan.x + dx, this.pan.y + dy);
     this.notify();

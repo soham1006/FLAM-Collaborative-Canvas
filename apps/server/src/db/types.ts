@@ -17,4 +17,6 @@ export interface IRoomRepository {
   getShapesByRoomId(roomId: string): Promise<ShapeDTO[]>;
   saveShapes(roomId: string, shapes: ShapeDTO[]): Promise<void>;
   deleteShapes(roomId: string, shapeIds: string[]): Promise<void>;
+  listRooms?(limit?: number): Promise<RoomRecord[]>;
 }
+

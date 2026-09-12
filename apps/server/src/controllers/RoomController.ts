@@ -25,6 +25,12 @@ export const roomController: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  // List Recent Public Rooms
+  fastify.get('/api/rooms', async (_request, reply) => {
+    const rooms = await roomService.listRecentRooms(20);
+    return reply.send({ rooms });
+  });
+
   // Get Room Details
   fastify.get('/api/rooms/:slug', async (request, reply) => {
     const { slug } = request.params as { slug: string };

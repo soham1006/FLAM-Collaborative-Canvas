@@ -126,8 +126,28 @@ export const ShapeDeleteSchema = z.object({
   shapeIds: z.array(z.string().min(1)),
 });
 
+// Stroke Streaming Schemas
+export const StrokeStartSchema = z.object({
+  strokeId: z.string().min(1),
+  tool: z.string().default('freehand'),
+  strokeColor: z.string().default('#0f172a'),
+  strokeWidth: z.number().min(0.5).max(50).default(2),
+  opacity: z.number().min(0).max(1).optional(),
+  startPoint: Point2DSchema,
+});
+
+export const StrokeChunkSchema = z.object({
+  strokeId: z.string().min(1),
+  points: z.array(Point2DSchema).min(1),
+});
+
+export const StrokeEndSchema = z.object({
+  strokeId: z.string().min(1),
+});
+
 // REST API Schemas
 export const CreateRoomSchema = z.object({
   name: z.string().trim().min(1).max(100),
   isPublic: z.boolean().default(true),
 });
+

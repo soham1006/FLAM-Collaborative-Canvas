@@ -24,6 +24,7 @@ export * from './commands/ICommand.js';
 export * from './commands/AddShapeCommand.js';
 export * from './commands/DeleteShapeCommand.js';
 export * from './commands/MoveShapeCommand.js';
+export * from './commands/ResizeShapeCommand.js';
 export * from './history/HistoryManager.js';
 
 // Selection & Gizmos

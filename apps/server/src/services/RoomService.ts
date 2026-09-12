@@ -29,4 +29,12 @@ export class RoomService {
     const shapes = await this.repo.getShapesByRoomId(room.id);
     return { room, shapes };
   }
+
+  async listRecentRooms(limit: number = 20): Promise<RoomRecord[]> {
+    if (this.repo.listRooms) {
+      return this.repo.listRooms(limit);
+    }
+    return [];
+  }
 }
+

@@ -8,6 +8,9 @@ import {
   ShapeCreateSchema,
   ShapeUpdateSchema,
   ShapeDeleteSchema,
+  StrokeStartSchema,
+  StrokeChunkSchema,
+  StrokeEndSchema,
   UserPresence,
 } from '@flam/shared';
 import { RoomSession } from './RoomSession.js';
@@ -227,6 +230,65 @@ export class ConnectionManager {
           timestamp: Date.now(),
           payload: { shapeIds, seq },
         });
+        break;
+      }
+
+      case 'STROKE_START': {
+        const data = StrokeStartSchema.parse(payload);
+        session.broadcast(
+          {
+            type: 'STROKE_START_BROADCAST',
+            roomId,
+            senderId,
+            timestamp: Date.now(),
+            payload: {
+              userId: senderId,
+              strokeId: data.strokeId,
+              tool: data.tool,
+              strokeColor: data.strokeColor,
+              strokeWidth: data.strokeWidth,
+              opacity: data.opacity,
+              startPoint: data.startPoint,
+            },
+          },
+          senderId
+        );
+        break;
+      }
+
+      case 'STROKE_CHUNK': {
+        const data = StrokeChunkSchema.parse(payload);
+        session.broadcast(
+          {
+            type: 'STROKE_CHUNK_BROADCAST',
+            roomId,
+            senderId,
+            timestamp: Date.now(),
+            payload: {
+              userId: senderId,
+              strokeId: data.strokeId,
+              points: data.points,
+            },
+          },
+          senderId
+        );
+        break;
+      }
+
+      case 'STROKE_END': {
+        const data = StrokeEndSchema.parse(payload);
+        session.broadcast(
+          {
+            type: 'STROKE_END',
+            roomId,
+            senderId,
+            timestamp: Date.now(),
+            payload: {
+              strokeId: data.strokeId,
+            },
+          },
+          senderId
+        );
         break;
       }
     }

@@ -12,22 +12,53 @@ export class FreehandPath extends BaseShape {
     this.points = props.points || [];
   }
 
-  public simplify(epsilon: number = 1.2): void {
-    this.points = simplifyPathRDP(this.points, epsilon);
+  public static roundPoint(p: Point2D): Point2D {
+    return {
+      x: Math.round(p.x * 10) / 10,
+      y: Math.round(p.y * 10) / 10,
+    };
+  }
+
+  public simplify(epsilon: number = 1.0): void {
+    this.points = simplifyPathRDP(this.points, epsilon).map(FreehandPath.roundPoint);
     this.updateBoundsFromPoints();
   }
 
-  public addPoint(point: Point2D): void {
-    this.points.push(point);
+  public addPoint(point: Point2D): boolean {
+    const rounded = FreehandPath.roundPoint(point);
+    if (this.points.length > 0) {
+      const last = this.points[this.points.length - 1];
+      const dx = rounded.x - last.x;
+      const dy = rounded.y - last.y;
+      if (dx * dx + dy * dy < 1.0) {
+        return false; // Skip sub-pixel redundant points
+      }
+    }
+    this.points.push(rounded);
+    this.updateBoundsFromPoints();
+    return true;
+  }
+
+  public addPoints(newPoints: Point2D[]): void {
+    for (const pt of newPoints) {
+      const rounded = FreehandPath.roundPoint(pt);
+      if (this.points.length > 0) {
+        const last = this.points[this.points.length - 1];
+        const dx = rounded.x - last.x;
+        const dy = rounded.y - last.y;
+        if (dx * dx + dy * dy < 1.0) continue;
+      }
+      this.points.push(rounded);
+    }
     this.updateBoundsFromPoints();
   }
 
   private updateBoundsFromPoints(): void {
     const box = BoundingBox.fromPoints(this.points);
-    this.x = box.minX;
-    this.y = box.minY;
-    this.width = box.width;
-    this.height = box.height;
+    this.x = Math.round(box.minX * 10) / 10;
+    this.y = Math.round(box.minY * 10) / 10;
+    this.width = Math.round(box.width * 10) / 10;
+    this.height = Math.round(box.height * 10) / 10;
   }
 
   protected drawGeometry(ctx: CanvasRenderingContext2D): void {
@@ -108,10 +139,10 @@ export class FreehandPath extends BaseShape {
     return {
       id: this.id,
       type: 'freehand',
-      x: this.x,
-      y: this.y,
-      width: this.width,
-      height: this.height,
+      x: Math.round(this.x * 10) / 10,
+      y: Math.round(this.y * 10) / 10,
+      width: Math.round(this.width * 10) / 10,
+      height: Math.round(this.height * 10) / 10,
       rotation: this.rotation,
       strokeColor: this.strokeColor,
       fillColor: this.fillColor,
@@ -119,7 +150,7 @@ export class FreehandPath extends BaseShape {
       opacity: this.opacity,
       zIndex: this.zIndex,
       version: this.version,
-      points: this.points,
+      points: this.points.map(FreehandPath.roundPoint),
     };
   }
 }
