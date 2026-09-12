@@ -11,7 +11,11 @@
     "dev": "concurrently -n \"server,web\" -c \"blue,cyan\" \"npm run dev:server\" \"npm run dev:web\"",
     "dev:web": "npm run dev --workspace=@flam/web",
     "dev:server": "npm run dev --workspace=@flam/server",
-    "build": "npm run build --workspaces --if-present",
+    "build:shared": "npm run build --workspace=@flam/shared",
+    "build:server": "npm run build --workspace=@flam/server",
+    "build:web": "npm run build --workspace=@flam/shared && npm run build --workspace=@flam/drawing-engine && npm run build --workspace=@flam/web",
+    "build": "npm run build:shared && npm run build --workspace=@flam/drawing-engine && npm run build:server && npm run build --workspace=@flam/web",
+    "start:server": "npm run start --workspace=@flam/server",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
