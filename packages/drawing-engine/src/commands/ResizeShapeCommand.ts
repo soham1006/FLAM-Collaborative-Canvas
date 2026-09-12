@@ -36,3 +36,4 @@ export class ResizeShapeCommand implements ICommand {
     this.onMutated?.();
   }
 }
+

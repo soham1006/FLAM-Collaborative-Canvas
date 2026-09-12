@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import {
   WSMessage,
   RoomStatePayload,
@@ -28,6 +28,7 @@ export function useCollaboration({ engineRef, roomId: propRoomId }: UseCollabora
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastCursorSendRef = useRef<number>(0);
+  const pendingInitialShapesRef = useRef<ShapeDTO[] | null>(null);
 
   // Granular store subscriptions (avoids re-rendering on store changes)
   const storeRoomId = useCanvasStore((s) => s.roomId);
@@ -36,6 +37,28 @@ export function useCollaboration({ engineRef, roomId: propRoomId }: UseCollabora
   const setCollaborators = useCanvasStore((s) => s.setCollaborators);
   const updateUserCursor = useCanvasStore((s) => s.updateUserCursor);
   const setRoomInfo = useCanvasStore((s) => s.setRoomInfo);
+
+  const applyRoomShapes = useCallback((shapes: ShapeDTO[], targetEngine?: CanvasEngine) => {
+    const engine = targetEngine || engineRef.current;
+    if (!engine || shapes.length === 0) return;
+    const currentShapes = engine.getShapes();
+    if (currentShapes.length === 0) {
+      engine.setShapesFromDTO(shapes);
+    } else {
+      const existingIds = new Set(currentShapes.map((s) => s.id));
+      for (const s of shapes) {
+        if (!existingIds.has(s.id)) {
+          engine.addShape(s, false);
+        }
+      }
+    }
+  }, [engineRef]);
+
+  const onEngineReady = useCallback((engine: CanvasEngine) => {
+    if (pendingInitialShapesRef.current && pendingInitialShapesRef.current.length > 0) {
+      applyRoomShapes(pendingInitialShapesRef.current, engine);
+    }
+  }, [applyRoomShapes]);
 
   useEffect(() => {
     if (!roomId) {
@@ -118,19 +141,10 @@ export function useCollaboration({ engineRef, roomId: propRoomId }: UseCollabora
               // Filter out current user from remote collaborator list
               setCollaborators(data.users.filter((u) => u.id !== currentUserId));
 
-              // Populate or merge shapes on canvas without clobbering existing local drawings
+              // Store and populate shapes on canvas
+              pendingInitialShapesRef.current = data.shapes;
               if (engineRef.current && data.shapes.length > 0) {
-                const currentShapes = engineRef.current.getShapes();
-                if (currentShapes.length === 0) {
-                  engineRef.current.setShapesFromDTO(data.shapes);
-                } else {
-                  const existingIds = new Set(currentShapes.map((s) => s.id));
-                  for (const s of data.shapes) {
-                    if (!existingIds.has(s.id)) {
-                      engineRef.current.addShape(s, false);
-                    }
-                  }
-                }
+                applyRoomShapes(data.shapes);
               }
               break;
             }
@@ -403,6 +417,7 @@ export function useCollaboration({ engineRef, roomId: propRoomId }: UseCollabora
   };
 
   return {
+    onEngineReady,
     sendCursorMove,
     sendStrokeStart,
     sendStrokeChunk,

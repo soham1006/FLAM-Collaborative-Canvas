@@ -4,6 +4,8 @@ import { useCanvasStore } from '../store/useCanvasStore';
 
 interface UseCanvasEngineProps {
   canvases: { base: HTMLCanvasElement; overlay: HTMLCanvasElement } | null;
+  engineRef?: React.MutableRefObject<CanvasEngine | null>;
+  onEngineReady?: (engine: CanvasEngine) => void;
   onShapeCreated?: (shape: ShapeDTO) => void;
   onShapeUpdated?: (shape: ShapeDTO) => void;
   onShapeDeleted?: (shapeIds: string[]) => void;
@@ -15,6 +17,8 @@ interface UseCanvasEngineProps {
 
 export function useCanvasEngine({
   canvases,
+  engineRef: externalEngineRef,
+  onEngineReady,
   onShapeCreated,
   onShapeUpdated,
   onShapeDeleted,
@@ -23,10 +27,12 @@ export function useCanvasEngine({
   onStrokeChunk,
   onStrokeEnd,
 }: UseCanvasEngineProps) {
-  const engineRef = useRef<CanvasEngine | null>(null);
+  const internalEngineRef = useRef<CanvasEngine | null>(null);
+  const engineRef = externalEngineRef || internalEngineRef;
 
   // Store callbacks in mutable ref to decouple engine lifecycle from React renders
   const callbacksRef = useRef({
+    onEngineReady,
     onShapeCreated,
     onShapeUpdated,
     onShapeDeleted,
@@ -38,6 +44,7 @@ export function useCanvasEngine({
 
   useEffect(() => {
     callbacksRef.current = {
+      onEngineReady,
       onShapeCreated,
       onShapeUpdated,
       onShapeDeleted,
@@ -99,11 +106,18 @@ export function useCanvasEngine({
       },
     });
 
+    // Initialize immediate state on engine
+    engine.setTool(activeTool);
+    engine.setPanningMode(activeTool === 'hand');
+    engine.setStyleProps({ strokeColor, fillColor, strokeWidth, opacity });
+    engine.setRemoteUsers(collaborators);
+
     const unbindMove = engine.events.on('pointer:move', (data: any) => {
       callbacksRef.current.onPointerMove?.(data.world);
     });
 
     engineRef.current = engine;
+    callbacksRef.current.onEngineReady?.(engine);
 
     return () => {
       unbindMove();

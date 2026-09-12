@@ -55,3 +55,4 @@ export function clearRecentBoards(): void {
     console.warn('[recentBoards] Failed to clear recent boards:', err);
   }
 }
+

@@ -82,3 +82,4 @@ describe('SqliteRoomRepository & RoomService', () => {
     assert.equal(shapes.length, 0);
   });
 });
+

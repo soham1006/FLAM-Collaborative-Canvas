@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces --if-present",
+    "dev": "concurrently -n \"server,web\" -c \"blue,cyan\" \"npm run dev:server\" \"npm run dev:web\"",
     "dev:web": "npm run dev --workspace=@flam/web",
     "dev:server": "npm run dev --workspace=@flam/server",
     "build": "npm run build --workspaces --if-present",
@@ -25,5 +25,8 @@
     "flam-ai"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
 }

@@ -30,11 +30,13 @@ function BoardWorkspace({
   const [canvases, setCanvases] = useState<{ base: HTMLCanvasElement; overlay: HTMLCanvasElement } | null>(null);
   const { setActiveTool, setRoomInfo } = useCanvasStore();
 
-  const sharedEngineRef = useRef<CanvasEngine | null>(null);
-  const collab = useCollaboration({ engineRef: sharedEngineRef, roomId });
+  const engineRef = useRef<CanvasEngine | null>(null);
+  const collab = useCollaboration({ engineRef, roomId });
 
-  const activeEngineRef = useCanvasEngine({
+  useCanvasEngine({
+    engineRef,
     canvases,
+    onEngineReady: collab.onEngineReady,
     onShapeCreated: (shape) => collab.sendShapeCreated(shape),
     onShapeUpdated: (shape) => collab.sendShapeUpdated(shape),
     onShapeDeleted: (shapeIds) => collab.sendShapeDeleted(shapeIds),
@@ -43,11 +45,6 @@ function BoardWorkspace({
     onStrokeChunk: (payload) => collab.sendStrokeChunk(payload),
     onStrokeEnd: (payload) => collab.sendStrokeEnd(payload),
   });
-
-  // Keep shared engine ref updated
-  useEffect(() => {
-    sharedEngineRef.current = activeEngineRef.current;
-  }, [activeEngineRef]);
 
   // Sync Room ID and title to store & save in recent boards
   useEffect(() => {
@@ -107,10 +104,10 @@ function BoardWorkspace({
 
   // Export Handlers
   const handleExport = (format: 'png' | 'svg' | 'json') => {
-    if (!activeEngineRef.current) return;
+    if (!engineRef.current) return;
 
     if (format === 'json') {
-      const shapes = activeEngineRef.current.getShapes().map((s) => s.serialize());
+      const shapes = engineRef.current.getShapes().map((s) => s.serialize());
       const dataStr =
         'data:text/json;charset=utf-8,' +
         encodeURIComponent(JSON.stringify(shapes, null, 2));
@@ -136,7 +133,7 @@ function BoardWorkspace({
     }
 
     if (format === 'svg') {
-      const shapes = activeEngineRef.current.getShapes();
+      const shapes = engineRef.current.getShapes();
       let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">\n`;
 
       for (const shape of shapes) {
@@ -181,8 +178,8 @@ function BoardWorkspace({
         <CanvasContainer onMount={setCanvases} />
         <PropertiesPanel />
         <Toolbar
-          onUndo={() => activeEngineRef.current?.undo()}
-          onRedo={() => activeEngineRef.current?.redo()}
+          onUndo={() => engineRef.current?.undo()}
+          onRedo={() => engineRef.current?.redo()}
         />
         <Minimap />
         <ShortcutsModal
