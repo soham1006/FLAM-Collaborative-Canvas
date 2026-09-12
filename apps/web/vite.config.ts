@@ -15,6 +15,13 @@ export default defineConfig({
         target: 'ws://127.0.0.1:4000',
         ws: true,
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err: any) => {
+            // Suppress expected TCP resets when browser tabs are closed or reloaded
+            if (err.code === 'ECONNRESET' || err.code === 'EPIPE') return;
+            console.warn('[vite ws proxy]', err.message);
+          });
+        },
       },
     },
   },
